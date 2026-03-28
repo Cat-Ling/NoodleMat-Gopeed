@@ -3,7 +3,7 @@
   "author": "luna",
   "title": "NoodleMat Downloader",
   "description": "Download videos from NoodleMagazine and Mat6Tube.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "repository": {
     "url": "https://github.com/Cat-Ling/NoodleMat-DL"
   },
@@ -12,7 +12,9 @@
       "event": "onResolve",
       "match": {
         "urls": [
+          "*://noodlemagazine.com/*",
           "*://*.noodlemagazine.com/*",
+          "*://mat6tube.com/*",
           "*://*.mat6tube.com/*"
         ]
       },
