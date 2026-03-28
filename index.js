@@ -1,128 +1,178 @@
-const DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36";
+var DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36";
 
-gopeed.events.onResolve(async (ctx) => {
-  let url = ctx.req.url;
-  // Normalize domain to mat6tube as NoodleMat-DL does
-  if (url.includes("noodlemagazine.com")) {
+gopeed.events.onResolve(function (ctx) {
+  var url = ctx.req.url;
+  // Normalize domain
+  if (url.indexOf("noodlemagazine.com") !== -1) {
     url = url.replace("noodlemagazine.com", "mat6tube.com");
   }
 
-  // Initial fetch with proper headers
-  const response = await fetch(url, {
+  fetch(url, {
     headers: {
       "User-Agent": DEFAULT_UA,
-      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-      "Accept-Language": "en-US,en;q=0.9",
       "Referer": "https://mat6tube.com/"
     }
-  });
-
-  if (!response.ok) {
-    throw new Error(`Fetch failed with status: ${response.status}. Site might be blocking us or requires Cloudflare bypass.`);
-  }
-  const html = await response.text();
-
-  // Function to extract and resolve from HTML
-  async function resolve(currentUrl, currentHtml, depth = 0) {
-    if (depth > 2) return null;
-
-    // 1. Extract Title from <title> tag or <h1>
-    let title = "NoodleVideo";
-    const titleMatch = currentHtml.match(/<title>(.+?)<\/title>/i);
-    if (titleMatch) {
-      title = titleMatch[1];
-    } else {
-      const h1Match = currentHtml.match(/<h1>(.+?)<\/h1>/i);
-      if (h1Match) title = h1Match[1];
+  }).then(function (response) {
+    if (!response.ok) {
+      throw new Error("Fetch failed with status: " + response.status);
     }
+    return response.text();
+  }).then(function (html) {
+    
+    function resolve(currentUrl, currentHtml, depth) {
+      if (depth === undefined) depth = 0;
+      if (depth > 2) return Promise.resolve(null);
 
-    // 2. Clean Title
-    title = title.replace(/ - BEST XXX TUBE/i, "")
-                 .replace(/ - NoodleMagazine/i, "")
-                 .replace(/ - Mat6Tube/i, "")
-                 .replace(/[\\/:"*?<>|]/g, "_")
-                 .replace(/\s+/g, " ")
-                 .trim();
+      // 1. Extract Title
+      var title = "";
+      var ogTitleMatch = currentHtml.match(/property="og:title"\s+content="([^"]+)"/i);
+      var schemaNameMatch = currentHtml.match(/"@type":\s*"VideoObject",\s*"name":\s*"([^"]+)"/i);
+      var tagTitleMatch = currentHtml.match(/<title>(.+?)<\/title>/i);
 
-    // 3. Extract Playlist JSON (window.playlist = {...})
-    const playlistMatch = currentHtml.match(/window\.playlist\s*=\s*({.*?});/);
-    if (playlistMatch) {
-      try {
-        const jsonStr = playlistMatch[1];
-        const playlist = JSON.parse(jsonStr);
-        const sources = playlist.sources || [];
-        // Sort by label (resolution) descending
-        sources.sort((a, b) => (parseInt(b.label) || 0) - (parseInt(a.label) || 0));
-        
-        if (sources.length > 0) {
-          const bestSource = sources[0];
-          return {
-            name: title,
-            files: [
-              {
-                name: `${title}.mp4`,
-                req: {
-                  url: bestSource.file,
-                  headers: {
-                    "Referer": currentUrl,
-                    "User-Agent": DEFAULT_UA
-                  }
-                }
-              }
-            ]
-          };
-        }
-      } catch (e) {
-        // JSON parse failed, continue to fallback
+      if (ogTitleMatch) title = ogTitleMatch[1];
+      else if (schemaNameMatch) title = schemaNameMatch[1];
+      else if (tagTitleMatch) title = tagTitleMatch[1];
+      else title = "NoodleVideo";
+
+      title = title.replace(/ - BEST XXX TUBE/i, "")
+                   .replace(/ - NoodleMagazine/i, "")
+                   .replace(/ - Mat6Tube/i, "")
+                   .replace(/&#039;/g, "'")
+                   .replace(/&amp;/g, "&")
+                   .replace(/[\\/:"*?<>|]/g, "_")
+                   .replace(/\s+/g, " ")
+                   .trim();
+
+      if (typeof gopeed !== 'undefined' && gopeed.logger) {
+        gopeed.logger.info("Extracted Title: " + title);
       }
-    }
 
-    // 4. Fallback: Download Page link (downloadUrl="...")
-    const downloadPageMatch = currentHtml.match(/downloadUrl\s*=\s*"([^"]+)"/);
-    if (downloadPageMatch) {
-      const downloadPageUrl = "https://mat6tube.com" + downloadPageMatch[1];
-      const dpResponse = await fetch(downloadPageUrl, {
-        headers: { 
-          "User-Agent": DEFAULT_UA,
-          "Referer": currentUrl
+      // 2. Extract Video URL
+      var videoUrl = "";
+      
+      // Look for window.playlist
+      var playlistMatch = currentHtml.match(/window\.playlist\s*=\s*(\{[\s\S]*?\});/);
+      if (playlistMatch) {
+        try {
+          var playlist = JSON.parse(playlistMatch[1]);
+          var sources = playlist.sources || [];
+          sources.sort(function(a, b) {
+            return (parseInt(b.label) || 0) - (parseInt(a.label) || 0);
+          });
+          if (sources.length > 0) videoUrl = sources[0].file;
+        } catch (e) {
+          if (typeof gopeed !== 'undefined' && gopeed.logger) gopeed.logger.error("Failed to parse window.playlist JSON: " + e.message);
         }
-      });
-      if (dpResponse.ok) {
-        const dpHtml = await dpResponse.text();
-        return await resolve(downloadPageUrl, dpHtml, depth + 1);
       }
+
+      // Fallbacks if no playlist found
+      if (!videoUrl) {
+        var ogVideoMatch = currentHtml.match(/property="og:video"\s+content="([^"]+)"/i);
+        if (ogVideoMatch) videoUrl = ogVideoMatch[1];
+      }
+
+      // Ignore fake videofile links
+      if (videoUrl && videoUrl.indexOf("/videofile/") !== -1) {
+        videoUrl = "";
+      }
+
+      if (videoUrl && (videoUrl.indexOf("/player/") !== -1 || videoUrl.indexOf("nmcorp.video") !== -1)) {
+        if (typeof gopeed !== 'undefined' && gopeed.logger) {
+          gopeed.logger.info("Found player URL, fetching inner source: " + videoUrl);
+        }
+        return fetch(videoUrl, {
+          headers: { "User-Agent": DEFAULT_UA, "Referer": currentUrl }
+        }).then(function (pResp) {
+          if (pResp.ok) return pResp.text();
+          return "";
+        }).then(function (pHtml) {
+          var pPlaylistMatch = pHtml.match(/window\.playlist\s*=\s*(\{[\s\S]*?\});/);
+          if (pPlaylistMatch) {
+            try {
+              var pPlaylist = JSON.parse(pPlaylistMatch[1]);
+              var pSources = pPlaylist.sources || [];
+              pSources.sort(function(a, b) {
+                return (parseInt(b.label) || 0) - (parseInt(a.label) || 0);
+              });
+              if (pSources.length > 0) videoUrl = pSources[0].file;
+            } catch(e) {
+               if (typeof gopeed !== 'undefined' && gopeed.logger) gopeed.logger.error("Failed to parse player window.playlist JSON: " + e.message);
+            }
+          }
+          return finalize(videoUrl, title, currentUrl);
+        });
+      }
+
+      if (videoUrl) {
+        return Promise.resolve(finalize(videoUrl, title, currentUrl));
+      }
+
+      // 3. Fallback: Download Page
+      var downloadPageMatch = currentHtml.match(/downloadUrl\s*=\s*"([^"]+)"/);
+      if (downloadPageMatch) {
+        var downloadPageUrl = "https://mat6tube.com" + downloadPageMatch[1];
+        if (typeof gopeed !== 'undefined' && gopeed.logger) {
+          gopeed.logger.info("Following downloadUrl: " + downloadPageUrl);
+        }
+        return fetch(downloadPageUrl, {
+          headers: { "User-Agent": DEFAULT_UA, "Referer": currentUrl }
+        }).then(function (dpResp) {
+          if (dpResp.ok) return dpResp.text();
+          return "";
+        }).then(function (dpHtml) {
+          if (dpHtml) return resolve(downloadPageUrl, dpHtml, depth + 1);
+          return null;
+        });
+      }
+
+      // 4. Final Fallback: Direct MP4
+      var mp4Match = currentHtml.match(/https?:\/\/[^"']+\.mp4[^"']*/);
+      if (mp4Match) {
+        var directUrl = mp4Match[0];
+        if (directUrl.indexOf("/videofile/") === -1) { // Ignore fake direct urls
+           return Promise.resolve(finalize(directUrl, title, currentUrl));
+        }
+      }
+
+      return Promise.resolve(null);
     }
 
-    // 5. Fallback: search for direct mp4 links in HTML
-    const mp4Match = currentHtml.match(/https?:\/\/[^"']+\.mp4[^"']*/);
-    if (mp4Match) {
+    function finalize(videoUrl, title, referer) {
+      if (!videoUrl) return null;
+      if (typeof gopeed !== 'undefined' && gopeed.logger) {
+        gopeed.logger.info("Successfully resolved video URL: " + videoUrl);
+      }
       return {
         name: title,
         files: [
           {
-            name: `${title}.mp4`,
+            name: title + ".mp4",
             req: {
-              url: mp4Match[0],
-              headers: {
-                "Referer": currentUrl,
-                "User-Agent": DEFAULT_UA
+              url: videoUrl,
+              extra: {
+                header: {
+                  "Referer": referer,
+                  "User-Agent": DEFAULT_UA,
+                  "Accept": "*/*"
+                }
               }
             }
           }
         ]
       };
     }
-    return null;
-  }
 
-  const result = await resolve(url, html);
-  if (result) {
-    ctx.res = result;
-  } else {
-    // Check if the HTML contains any common error indicators
-    if (html.includes("cf-browser-verification") || html.includes("Cloudflare")) {
-      throw new Error("Cloudflare challenge detected. Extension cannot bypass JS-based challenges automatically.");
+    return resolve(url, html);
+  }).then(function (result) {
+    if (result) {
+      ctx.res = result;
+    } else {
+      throw new Error("Could not resolve video source. The site structure might have changed or Cloudflare blocked the request.");
     }
-    throw new Error("Video source not found. Site structure might have changed or protection is active.");
-  }
+  }).catch(function (err) {
+    if (typeof gopeed !== 'undefined' && gopeed.logger) {
+      gopeed.logger.error("NoodleMat Extension Error: " + err.message);
+    }
+    throw err;
+  });
 });
