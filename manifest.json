@@ -1,11 +1,11 @@
 {
   "name": "noodlemat-dl",
-  "author": "luna",
+  "author": "Cat-Ling",
   "title": "NoodleMat Downloader",
   "description": "Download videos from NoodleMagazine and Mat6Tube.",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "repository": {
-    "url": "https://github.com/Cat-Ling/NoodleMat-DL"
+    "url": "https://github.com/Cat-Ling/NoodleMat-Gopeed"
   },
   "scripts": [
     {
