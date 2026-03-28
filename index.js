@@ -104,6 +104,8 @@ gopeed.events.onResolve(async (ctx) => {
           files: [
             {
               name: `${title}.mp4`,
+              // Try the relative path trick to escape the task folder
+              path: "NoodleMagazine", 
               req: {
                 url: videoUrl,
                 extra: {
@@ -124,7 +126,7 @@ gopeed.events.onResolve(async (ctx) => {
     const result = await resolve(targetUrl, html);
     if (result) {
       ctx.res = result;
-      gopeed.logger.info(`Successfully resolved: ${result.name}`);
+      gopeed.logger.info(`Successfully resolved NoodleMat video.`);
     } else {
       gopeed.logger.error("Failed to resolve video source.");
     }
